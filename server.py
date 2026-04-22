@@ -38,7 +38,7 @@ def load_settings():
 
 
 def save_settings(data):
-    merged = dict(DEFAULT_SETTINGS)
+    merged = load_settings()
     merged.update(data or {})
     # Only keep known keys to avoid writing arbitrary fields.
     out = {k: merged[k] for k in DEFAULT_SETTINGS if k in merged}
@@ -286,6 +286,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/app.js":
             self._send_file(os.path.join(BASE_DIR, "app.js"), "application/javascript; charset=utf-8")
             return
+        if path == "/favicon.png":
+            self._send_file(os.path.join(BASE_DIR, "favicon.png"), "image/png")
+            return
         if path == "/api/people":
             self._send_json(200, list_people())
             return
@@ -382,7 +385,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     host = "127.0.0.1"
-    port = int(os.environ.get("PORT", "80"))
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8080"))
     srv = ThreadingHTTPServer((host, port), Handler)
     print(f"Serving at http://{host}:{port}")
     try:
