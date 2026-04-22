@@ -53,9 +53,10 @@ button.small { padding: 3px 8px; font-size: 12px; }
 .people-list .row:last-child { border-bottom: none; }
 .people-list .name-he { font-weight: 600; font-size: 16px; }
 .people-list .name-en {
-  color: #666; font-size: 13px; direction: ltr;
+  color: #666; font-size: 16px; direction: ltr;
   display: inline-block; margin-inline-end: 12px;
 }
+.people-list .pv-note { font-size: 14px; color: #555; }
 .people-list .row-meta {
   text-align: left; display: flex; gap: 10px; align-items: baseline;
   white-space: nowrap;
@@ -374,6 +375,13 @@ a.file-link:hover { background: #e8f1fb; border-color: #90caf9; }
 .field-row textarea { min-height: 60px; resize: vertical; }
 .field-row .comment input { background: #fffbe6; }
 .field-row .ref-open-cell button { margin-top: 2px; }
+.field-row .linked-person-info {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #555;
+  line-height: 1.35;
+}
+.field-row .linked-person-info bdi + bdi { margin-inline-start: 6px; }
 
 /* Small "×" remove button shown on expanded optional fields */
 .field-label .optional-remove {
@@ -410,8 +418,9 @@ a.file-link:hover { background: #e8f1fb; border-color: #90caf9; }
 .subfield {
   border: 1px solid #eee; padding: 8px; border-radius: 4px;
   background: #fafafa;
+  position: relative;
 }
-.subfield-actions { margin-top: 6px; display: flex; gap: 6px; }
+.subfield-actions { position: absolute; top: 4px; left: 4px; display: flex; gap: 6px; }
 
 .ref-mode {
   display: flex; gap: 8px; align-items: center; margin-bottom: 6px;
@@ -462,14 +471,21 @@ dialog h3 { margin-top: 0; }
   flex-shrink: 0;
 }
 .pv-row {
-  display: grid; grid-template-columns: 160px 1fr; gap: 14px;
+  display: flex; flex-direction: column; gap: 2px;
   padding: 6px 0; border-bottom: 1px dotted #ddd;
 }
 .pv-row:last-child { border-bottom: none; }
-.pv-label { font-weight: 600; color: #2c3e50; font-size: 14px; }
+.pv-label { font-weight: 600; color: #2c3e50; font-size: 13px; }
 .pv-value { font-size: 14px; color: #222; line-height: 1.5; }
 .pv-he { font-weight: 500; }
 .pv-en { color: #555; direction: ltr; display: inline-block; margin-inline-start: 6px; }
+.pv-linked-person {
+  direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
+  text-align: left;
+}
+.pv-linked-person .pv-en { margin-inline-start: 0; }
 .pv-comment { color: #888; font-size: 13px; }
 .pv-note { color: #888; font-size: 12px; }
 .pv-long { white-space: pre-wrap; }

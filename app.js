@@ -61,6 +61,7 @@ let state = {
   // draft.files = [{file?, data_url?, name?, mime?, comment}]
   cleanSnapshot: null,  // JSON string of draft right after load (for dirty detection)
   allData: [],          // full person objects for client-side search
+  sortOrder: "he-asc",  // current list sort order
   settings: { site_name: "מאגר אנשים" }, // loaded from /api/settings at startup
 };
 
@@ -79,6 +80,7 @@ function applySettings() {
   const title = document.getElementById("site-title");
   if (title) title.textContent = state.settings.site_name || "מאגר אנשים";
   if (state.settings.site_name) document.title = state.settings.site_name;
+  if (state.settings.sort_order) state.sortOrder = state.settings.sort_order;
 }
 
 function showSettingsDialog() {
@@ -169,7 +171,7 @@ function extractTexts(person) {
         if (val.comment) entries.push({ label: f.label + " (הערות)", text: val.comment });
         break;
       case "date":
-        if (val.value) entries.push({ label: f.label, text: val.value });
+        if (val.value) entries.push({ label: f.label, text: _formatDate(val.value) });
         if (val.comment) entries.push({ label: f.label + " (הערות)", text: val.comment });
         break;
       case "ref":
@@ -419,11 +421,80 @@ async function showList() {
   pushViewState({ view: "list" });
 }
 
+function _getPersonDate(tid, field) {
+  const person = state.allData.find(p => p.technical_id === tid);
+  if (!person || !person.versions || !person.versions.length) return null;
+  const data = person.versions[person.versions.length - 1].data || {};
+  const val = (data[field] || {}).value || "";
+  if (!val) return null;
+  // Try to extract a numeric year from the value
+  const m = String(val).match(/(\d{4})/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function sortPeopleList(list) {
+  const order = state.sortOrder;
+  const [key, dir] = order.split("-");  // e.g. "he-asc", "birth-desc"
+  const asc = dir === "asc" ? 1 : -1;
+
+  return list.slice().sort((a, b) => {
+    let va, vb;
+    if (key === "he") {
+      va = (a.display_he || "").trim();
+      vb = (b.display_he || "").trim();
+      // People without hebrew name go to end
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return asc * va.localeCompare(vb, "he");
+    } else if (key === "en") {
+      va = (a.display_en || "").trim();
+      vb = (b.display_en || "").trim();
+      if (!va && !vb) return 0;
+      if (!va) return 1;
+      if (!vb) return -1;
+      return asc * va.localeCompare(vb, "en");
+    } else if (key === "birth" || key === "death") {
+      const field = key === "birth" ? "birth_date" : "death_date";
+      va = _getPersonDate(a.technical_id, field);
+      vb = _getPersonDate(b.technical_id, field);
+      // People without the date go to end
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return asc * (va - vb);
+    }
+    return 0;
+  });
+}
+
+function onSortChange(value) {
+  state.sortOrder = value;
+  renderListView();
+  putSettings({ sort_order: value }).catch(e => console.warn("Failed to save sort order:", e));
+}
+
 function renderListView() {
   const view = document.getElementById("view");
+  const sortOptions = [
+    { value: "he-asc",    label: "שם עברי א←ת" },
+    { value: "he-desc",   label: "שם עברי ת←א" },
+    { value: "en-asc",    label: "שם לועזי A→Z" },
+    { value: "en-desc",   label: "שם לועזי Z→A" },
+    { value: "birth-asc", label: "תאריך לידה ↑" },
+    { value: "birth-desc",label: "תאריך לידה ↓" },
+    { value: "death-asc", label: "תאריך פטירה ↑" },
+    { value: "death-desc",label: "תאריך פטירה ↓" },
+  ];
+  const sortSelect = sortOptions.map(o =>
+    `<option value="${o.value}" ${o.value === state.sortOrder ? "selected" : ""}>${escapeHtml(o.label)}</option>`
+  ).join("");
   let html = `
     <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
       <h2 style="flex:1; margin:0;">רשימת אנשים</h2>
+      <select onchange="onSortChange(this.value)" style="padding:4px 8px; border-radius:4px; border:1px solid #ccc;">
+        ${sortSelect}
+      </select>
       <button class="primary" onclick="showNewPersonDialog()">+ הוסף אדם חדש</button>
     </div>
 
@@ -438,11 +509,14 @@ function renderListView() {
   if (state.people.length === 0) {
     html += `<div class="empty">אין אנשים במאגר. לחץ "הוסף אדם חדש" כדי להתחיל.</div>`;
   } else {
-    for (const p of state.people) {
+    const sorted = sortPeopleList(state.people);
+    for (const p of sorted) {
+      const desc = describeLinkedPerson(p.technical_id);
+      const datesHtml = desc && desc.dates ? ` <span class="pv-note">${escapeHtml(desc.dates)}</span>` : "";
       html += `
         <div class="row" onclick="showPerson('${p.technical_id}')">
           <div style="flex:1;">
-            <span class="name-he">${escapeHtml(p.display_he || "(ללא שם)")}</span>${p.display_en ? `<span class="name-en">${escapeHtml(p.display_en)}</span>` : ""}
+            <span class="name-he">${escapeHtml(p.display_he || "(ללא שם)")}</span>${p.display_en ? `<span class="name-en">${escapeHtml(p.display_en)}</span>` : ""}${datesHtml}
           </div>
           <div class="row-meta">
             <span class="tid">${escapeHtml(p.technical_id)}</span>
@@ -500,7 +574,7 @@ function defaultForKind(kind) {
     case "text":      return { he: "", en: "", comment: "" };
     case "long_text": return { he: "", en: "", comment: "" };
     case "place":     return { he: "", en: "", comment: "" };
-    case "date":      return { value: "", year_only: false, comment: "" };
+    case "date":      return { value: "", comment: "" };
     case "ref":       return { mode: "text", he: "", en: "", link_id: "", comment: "" };
     case "refs":      return [];
     case "bool":      return { value: false };
@@ -531,6 +605,21 @@ function hasContent(kind, val) {
 async function showPerson(tid) {
   if (!await guardUnsavedChanges()) return;
   const view = document.getElementById("view")
+  // Ensure the people list and the full-data cache are populated. These are
+  // normally loaded by showList(), but when the user deep-links directly to
+  // a person page those loads never happened — leaving the ref comboboxes
+  // empty and the linked-person caption blank.
+  const needPeople  = !state.people.length;
+  const needAllData = !state.allData.length;
+  if (needPeople || needAllData) {
+    view.innerHTML = "<div>טוען...</div>";
+    try {
+      const tasks = [];
+      if (needPeople)  tasks.push(listPeople().then(p => { state.people = p; }));
+      if (needAllData) tasks.push(loadAllData());
+      await Promise.all(tasks);
+    } catch (e) { view.innerHTML = "שגיאה: " + e.message; return; }
+  }
   // Try the in-memory cache first; fall back to server only if missing.
   let person = state.allData.find(p => p.technical_id === tid);
   if (!person) {
@@ -769,8 +858,7 @@ function printFmtDate(val) {
   if (!val) return "";
   const parts = [];
   if (val.value) {
-    parts.push(`<span class="pv-he">${escapeHtml(val.value)}</span>`);
-    if (val.year_only) parts.push(`<span class="pv-note">(שנה בלבד)</span>`);
+    parts.push(`<span class="pv-he">${escapeHtml(_formatDate(val.value))}</span>`);
   }
   if (val.comment) parts.push(`<span class="pv-comment">(${escapeHtml(val.comment)})</span>`);
   return parts.join(" ");
@@ -780,11 +868,24 @@ function printFmtDate(val) {
 function printFmtRef(val) {
   if (!val) return "";
   if (val.mode === "link" && val.link_id) {
-    const target = state.people.find(p => p.technical_id === val.link_id);
-    const name = target ? (target.display_he || target.technical_id) : val.link_id;
-    const nameEn = target ? (target.display_en || "") : "";
-    let html = `<span class="pv-he">${escapeHtml(name)}</span>`;
-    if (nameEn) html += ` <span class="pv-en">${escapeHtml(nameEn)}</span>`;
+    const desc = describeLinkedPerson(val.link_id);
+    let inner;
+    if (desc) {
+      inner = "";
+      if (desc.nameHe) inner += `<span class="pv-he">${escapeHtml(desc.nameHe)}</span>`;
+      if (desc.nameEn) inner += (inner ? " " : "") + `<span class="pv-en">${escapeHtml(desc.nameEn)}</span>`;
+      if (desc.dates)  inner += (inner ? " " : "") + `<span class="pv-note">${escapeHtml(desc.dates)}</span>`;
+    } else {
+      // Fallback when the linked person isn't in the client-side cache.
+      const target = state.people.find(p => p.technical_id === val.link_id);
+      const name = target ? (target.display_he || target.technical_id) : val.link_id;
+      const nameEn = target ? (target.display_en || "") : "";
+      inner = `<span class="pv-he">${escapeHtml(name)}</span>`;
+      if (nameEn) inner += ` <span class="pv-en">${escapeHtml(nameEn)}</span>`;
+    }
+    // Force LTR visual order: Hebrew name, Latin name, dates — matching the
+    // caption under the combobox in the edit view.
+    let html = `<span class="pv-linked-person">${inner}</span>`;
     if (val.comment) html += ` <span class="pv-comment">(${escapeHtml(val.comment)})</span>`;
     return html;
   }
@@ -811,6 +912,12 @@ function printRenderField(f, val) {
     case "richtext":  valueHtml = (typeof val === "string") ? val : ""; break;
   }
   if (!valueHtml) return "";
+  if (f.kind === "richtext") {
+    return `
+    <div class="pv-row">
+      <div class="pv-value">${valueHtml}</div>
+    </div>`;
+  }
   return `
     <div class="pv-row">
       <div class="pv-label">${escapeHtml(f.label)}</div>
@@ -1042,14 +1149,14 @@ function renderFreeText(editable) {
 
   if (!editable) {
     col.innerHTML = `
-      <div class="field"><div class="field-label">טקסט חופשי</div>
-        <div class="rt-content-readonly">${html || '<span class="inline-note">אין טקסט.</span>'}</div>
+      <div class="field">
+        <div class="rt-content-readonly">${html}</div>
       </div>`;
     return;
   }
 
   col.innerHTML = `
-    <div class="field"><div class="field-label">טקסט חופשי</div>
+    <div class="field">
       <div class="rt-toolbar" id="rt-toolbar">
         <button type="button" title="Bold" onmousedown="event.preventDefault()" onclick="rtExec('bold')"><b>B</b></button>
         <button type="button" title="Italic" onmousedown="event.preventDefault()" onclick="rtExec('italic')"><i>I</i></button>
@@ -1317,6 +1424,80 @@ function rtApplyFontSizePt(ptSize) {
   }
 }
 
+/**
+ * Parse a date string in various formats (DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD,
+ * YYYY, or free text) and return { day, month, year } with available parts.
+ */
+function _parseDate(s) {
+  if (!s) return null;
+  s = String(s).trim();
+  // DD-MM-YYYY or DD/MM/YYYY (day and month may be single digit)
+  let m = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (m) return { day: parseInt(m[1],10), month: parseInt(m[2],10), year: parseInt(m[3],10) };
+  // YYYY-MM-DD
+  m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if (m) return { day: parseInt(m[3],10), month: parseInt(m[2],10), year: parseInt(m[1],10) };
+  // Year only
+  m = s.match(/^(\d{4})$/);
+  if (m) return { year: parseInt(m[1],10) };
+  // Try to find a 4-digit year anywhere in free text
+  m = s.match(/(\d{4})/);
+  if (m) return { year: parseInt(m[1],10), freeText: s };
+  return { freeText: s };
+}
+
+/** Format a parsed date as DD-MM-YYYY, or just the year, or free text. */
+function _formatDate(s) {
+  const d = _parseDate(s);
+  if (!d) return "";
+  if (d.freeText) return d.freeText;
+  if (d.day && d.month && d.year) {
+    const dd = String(d.day).padStart(2, "0");
+    const mm = String(d.month).padStart(2, "0");
+    return `${dd}-${mm}-${d.year}`;
+  }
+  if (d.year) return String(d.year);
+  return s;
+}
+
+/** Extract a 4-digit year from a date field value. */
+function _extractYear(s) {
+  const d = _parseDate(s);
+  return d && d.year ? String(d.year) : "";
+}
+
+/**
+ * Given a technical_id, look up the linked person in the in-memory cache and
+ * return an object describing them: full Hebrew + Latin name, a "(birth-death)"
+ * string (or "(birth-)" if the person isn't marked deceased), plus the raw
+ * combined text representation used in the print view.
+ * Returns null if the linked person is not in state.allData.
+ */
+function describeLinkedPerson(tid) {
+  if (!tid) return null;
+  const person = state.allData.find(p => p.technical_id === tid);
+  if (!person || !person.versions || !person.versions.length) return null;
+  const data = person.versions[person.versions.length - 1].data || {};
+  const nameHe = [(data.first_name||{}).he, (data.last_name||{}).he].filter(Boolean).join(" ");
+  const nameEn = [(data.first_name||{}).en, (data.last_name||{}).en].filter(Boolean).join(" ");
+  const birthY = _extractYear((data.birth_date||{}).value);
+  const deathY = _extractYear((data.death_date||{}).value);
+  const deceased = !!((data.deceased||{}).value);
+  let dates = "";
+  if (birthY || deathY) {
+    if (deceased || deathY) dates = `(${birthY}-${deathY})`;
+    else if (birthY) dates = `(${birthY}-)`;
+  } else if (deceased) {
+    dates = "(-)";
+  }
+  // Plain-text form used by the print view.
+  const parts = [];
+  if (nameHe) parts.push(nameHe);
+  if (nameEn) parts.push(nameEn);
+  const text = parts.join(" / ") + (dates ? " " + dates : "");
+  return { nameHe, nameEn, dates, text };
+}
+
 function renderFieldControl(f, val, editable, path) {
   const disabled = editable ? "" : "disabled";
   switch (f.kind) {
@@ -1326,7 +1507,7 @@ function renderFieldControl(f, val, editable, path) {
         <div class="field-row">
           <div class="he"><label>עברית</label>
             <input ${disabled} value="${escapeAttr(val.he||"")}" oninput="updateField('${path}','he',this.value)"></div>
-          <div class="en"><label>English</label>
+          <div class="en"><label>Latin</label>
             <input ${disabled} value="${escapeAttr(val.en||"")}" oninput="updateField('${path}','en',this.value)"></div>
           <div class="comment"><label>הערות</label>
             <input ${disabled} value="${escapeAttr(val.comment||"")}" oninput="updateField('${path}','comment',this.value)"></div>
@@ -1336,7 +1517,7 @@ function renderFieldControl(f, val, editable, path) {
         <div class="field-row">
           <div class="he"><label>עברית</label>
             <textarea ${disabled} oninput="updateField('${path}','he',this.value)">${escapeHtml(val.he||"")}</textarea></div>
-          <div class="en"><label>English</label>
+          <div class="en"><label>Latin</label>
             <textarea ${disabled} oninput="updateField('${path}','en',this.value)">${escapeHtml(val.en||"")}</textarea></div>
           <div class="comment"><label>הערות</label>
             <textarea ${disabled} oninput="updateField('${path}','comment',this.value)">${escapeHtml(val.comment||"")}</textarea></div>
@@ -1344,14 +1525,11 @@ function renderFieldControl(f, val, editable, path) {
     case "date":
       return `
         <div class="field-row">
-          <div><label>תאריך${val.year_only ? " (שנה בלבד)" : ""}</label>
+          <div><label>תאריך</label>
             <input ${disabled} value="${escapeAttr(val.value||"")}"
-              placeholder="${val.year_only ? "1952" : "YYYY-MM-DD או טקסט"}"
+              placeholder="DD-MM-YYYY או שנה בלבד"
               oninput="updateField('${path}','value',this.value)"></div>
-          <div><label>
-              <input type="checkbox" ${disabled} ${val.year_only?"checked":""}
-                onchange="updateField('${path}','year_only',this.checked)"> שנה בלבד
-            </label></div>
+          <div></div>
           <div class="comment"><label>הערות</label>
             <input ${disabled} value="${escapeAttr(val.comment||"")}" oninput="updateField('${path}','comment',this.value)"></div>
         </div>`;
@@ -1387,6 +1565,15 @@ function renderRef(val, editable, path) {
   if (val.mode === "link") {
     const target = state.people.find(p => p.technical_id === val.link_id);
     const label = target ? `${target.display_he || target.technical_id}` : (val.link_id || "(לא נבחר)");
+    const desc = describeLinkedPerson(val.link_id);
+    let infoHtml = "";
+    if (desc) {
+      let inner = "";
+      if (desc.nameHe) inner += `<span class="pv-he">${escapeHtml(desc.nameHe)}</span>`;
+      if (desc.nameEn) inner += (inner ? " " : "") + `<span class="pv-en">${escapeHtml(desc.nameEn)}</span>`;
+      if (desc.dates)  inner += (inner ? " " : "") + `<span class="pv-note">${escapeHtml(desc.dates)}</span>`;
+      infoHtml = `<div class="linked-person-info">${inner}</div>`;
+    }
     return modeControls + `
       <div class="field-row">
         <div><label>קישור</label>
@@ -1396,6 +1583,7 @@ function renderRef(val, editable, path) {
                  ${state.people.filter(p => !state.currentPerson || p.technical_id !== state.currentPerson.technical_id).map(p => `<option value="${escapeAttr(p.technical_id)}" ${p.technical_id===val.link_id?"selected":""}>${escapeHtml(p.display_he || p.technical_id)} (${escapeHtml(p.technical_id)})</option>`).join("")}
                </select>`
             : `<span class="ref-link-display" onclick="showPerson('${escapeAttr(val.link_id)}')">${escapeHtml(label)} ↩</span>`}
+          ${infoHtml}
         </div>
         <div class="ref-open-cell">
           <label>&nbsp;</label>
@@ -1409,7 +1597,7 @@ function renderRef(val, editable, path) {
       <div class="field-row">
         <div class="he"><label>שם (עברית)</label>
           <input ${disabled} value="${escapeAttr(val.he||"")}" oninput="updateField('${path}','he',this.value)"></div>
-        <div class="en"><label>Name (English)</label>
+        <div class="en"><label>Name (Latin)</label>
           <input ${disabled} value="${escapeAttr(val.en||"")}" oninput="updateField('${path}','en',this.value)"></div>
         <div class="comment"><label>הערות</label>
           <input ${disabled} value="${escapeAttr(val.comment||"")}" oninput="updateField('${path}','comment',this.value)"></div>

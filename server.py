@@ -18,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
-DEFAULT_SETTINGS = {"site_name": "מאגר אנשים"}
+DEFAULT_SETTINGS = {"site_name": "מאגר אנשים", "sort_order": "he-asc"}
 os.makedirs(DATA_DIR, exist_ok=True)
 
 
