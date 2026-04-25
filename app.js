@@ -188,6 +188,8 @@ function extractTexts(person) {
           if (item.en) entries.push({ label: f.label + " " + n + " (EN)", text: item.en });
           if (item.link_id) entries.push({ label: f.label + " " + n + " (קישור)", text: item.link_id });
           if (item.comment) entries.push({ label: f.label + " " + n + " (הערות)", text: item.comment });
+          if (item.marriage_date) entries.push({ label: f.label + " " + n + " (תאריך נישואין)", text: item.marriage_date });
+          if (item.marriage_place) entries.push({ label: f.label + " " + n + " (מקום נישואין)", text: item.marriage_place });
         });
         break;
       case "richtext":
@@ -865,7 +867,7 @@ function printFmtDate(val) {
 }
 
 /** Format a single ref entry (either link or free text). */
-function printFmtRef(val) {
+function printFmtRef(val, fieldKey) {
   if (!val) return "";
   if (val.mode === "link" && val.link_id) {
     const desc = describeLinkedPerson(val.link_id);
@@ -887,15 +889,28 @@ function printFmtRef(val) {
     // caption under the combobox in the edit view.
     let html = `<span class="pv-linked-person">${inner}</span>`;
     if (val.comment) html += ` <span class="pv-comment">(${escapeHtml(val.comment)})</span>`;
+    if (fieldKey === "spouses") {
+      const mParts = [];
+      if (val.marriage_date) mParts.push("נישואין: " + _formatDate(val.marriage_date));
+      if (val.marriage_place) mParts.push(val.marriage_place);
+      if (mParts.length) html += ` <span class="pv-note">${escapeHtml(mParts.join(", "))}</span>`;
+    }
     return html;
   }
-  return printFmtText(val);
+  let html = printFmtText(val);
+  if (fieldKey === "spouses") {
+    const mParts = [];
+    if (val.marriage_date) mParts.push("נישואין: " + _formatDate(val.marriage_date));
+    if (val.marriage_place) mParts.push(val.marriage_place);
+    if (mParts.length) html += ` <span class="pv-note">${escapeHtml(mParts.join(", "))}</span>`;
+  }
+  return html;
 }
 
 /** Format a refs array as a vertical list. */
-function printFmtRefs(arr) {
+function printFmtRefs(arr, fieldKey) {
   if (!Array.isArray(arr) || arr.length === 0) return "";
-  return `<ul class="pv-refs">${arr.map(v => `<li>${printFmtRef(v)}</li>`).join("")}</ul>`;
+  return `<ul class="pv-refs">${arr.map(v => `<li>${printFmtRef(v, fieldKey)}</li>`).join("")}</ul>`;
 }
 
 /** Build a single row (label + value) for a schema field. */
@@ -906,8 +921,8 @@ function printRenderField(f, val) {
     case "place":     valueHtml = printFmtText(val); break;
     case "long_text": valueHtml = printFmtLongText(val); break;
     case "date":      valueHtml = printFmtDate(val); break;
-    case "ref":       valueHtml = printFmtRef(val); break;
-    case "refs":      valueHtml = printFmtRefs(val); break;
+    case "ref":       valueHtml = printFmtRef(val, f.key); break;
+    case "refs":      valueHtml = printFmtRefs(val, f.key); break;
     case "bool":      valueHtml = val && val.value ? "כן" : ""; break;
     case "richtext":  valueHtml = (typeof val === "string") ? val : ""; break;
   }
@@ -1534,9 +1549,9 @@ function renderFieldControl(f, val, editable, path) {
             <input ${disabled} value="${escapeAttr(val.comment||"")}" oninput="updateField('${path}','comment',this.value)"></div>
         </div>`;
     case "ref":
-      return renderRef(val, editable, path);
+      return renderRef(val, editable, path, f.key);
     case "refs":
-      return renderRefs(val, editable, path);
+      return renderRefs(val, editable, path, f.key);
     case "bool":
       return `
         <label class="inline-note" style="font-size:14px; color:#222;">
@@ -1553,7 +1568,7 @@ function updateBool(path, checked) {
   renderFields(isEditable());
 }
 
-function renderRef(val, editable, path) {
+function renderRef(val, editable, path, fieldKey) {
   const disabled = editable ? "" : "disabled";
   const modeControls = `
     <div class="ref-mode">
@@ -1562,6 +1577,18 @@ function renderRef(val, editable, path) {
       <label><input type="radio" name="mode-${path}" ${disabled}
         ${val.mode==="link"?"checked":""} onchange="updateField('${path}','mode','link')"> קישור לאדם אחר</label>
     </div>`;
+  const marriageHtml = fieldKey === "spouses" ? `
+      <div class="field-row">
+        <div><label>תאריך נישואין</label>
+          <input ${disabled} value="${escapeAttr(val.marriage_date||"")}"
+            placeholder="DD-MM-YYYY או שנה בלבד"
+            oninput="updateField('${path}','marriage_date',this.value)"></div>
+        <div><label>מקום נישואין</label>
+          <input ${disabled} value="${escapeAttr(val.marriage_place||"")}"
+            oninput="updateField('${path}','marriage_place',this.value)"></div>
+        <div></div>
+      </div>` : "";
+
   if (val.mode === "link") {
     const target = state.people.find(p => p.technical_id === val.link_id);
     const label = target ? `${target.display_he || target.technical_id}` : (val.link_id || "(לא נבחר)");
@@ -1591,7 +1618,7 @@ function renderRef(val, editable, path) {
         </div>
         <div class="comment"><label>הערות</label>
           <input ${disabled} value="${escapeAttr(val.comment||"")}" oninput="updateField('${path}','comment',this.value)"></div>
-      </div>`;
+      </div>` + marriageHtml;
   } else {
     return modeControls + `
       <div class="field-row">
@@ -1601,14 +1628,14 @@ function renderRef(val, editable, path) {
           <input ${disabled} value="${escapeAttr(val.en||"")}" oninput="updateField('${path}','en',this.value)"></div>
         <div class="comment"><label>הערות</label>
           <input ${disabled} value="${escapeAttr(val.comment||"")}" oninput="updateField('${path}','comment',this.value)"></div>
-      </div>`;
+      </div>` + marriageHtml;
   }
 }
 
-function renderRefs(arr, editable, path) {
+function renderRefs(arr, editable, path, fieldKey) {
   const items = (arr || []).map((item, i) => `
     <div class="subfield">
-      ${renderRef(item, editable, path + "[" + i + "]")}
+      ${renderRef(item, editable, path + "[" + i + "]", fieldKey)}
       ${editable ? `<div class="subfield-actions">
         <button type="button" class="small danger" onclick="removeRef('${path}',${i})">הסר</button>
       </div>` : ""}
